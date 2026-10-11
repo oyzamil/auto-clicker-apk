@@ -29,12 +29,28 @@ class ClickerService : AccessibilityService() {
     companion object {
         @Volatile
         var instance: ClickerService? = null
+
+        private val BLUE = 0xFF1E88E5.toInt()
+        private val AMBER = 0xFFFB8C00.toInt()
+        private val PURPLE = 0xFF8E24AA.toInt()
+        private val GREEN = 0xFF43A047.toInt()
+        private val ORANGE = 0xFFFF5A1F.toInt()
     }
 
     private class MarkerRef(
         val view: View,
         val params: WindowManager.LayoutParams,
         val size: Int,
+        val onMoved: (Float, Float) -> Unit
+    )
+
+    /** Description of one draggable marker. */
+    private class Spec(
+        val label: String,
+        val tint: Int,
+        val crosshair: Boolean,
+        val x: Float,
+        val y: Float,
         val onMoved: (Float, Float) -> Unit
     )
 
@@ -50,15 +66,19 @@ class ClickerService : AccessibilityService() {
     private var panel: LinearLayout? = null
     private var panelLp: WindowManager.LayoutParams? = null
     private var startBtn: TextView? = null
-    private var addBtn: TextView? = null
+    private var addTapBtn: TextView? = null
+    private var addSlideBtn: TextView? = null
+    private var addScrollBtn: TextView? = null
     private var recBtn: TextView? = null
     private var centerBtn: TextView? = null
-    private var hideBtn: TextView? = null
+    private var eyeBtn: TextView? = null
     private var closeBtn: TextView? = null
     private var collapsed = false
+    private var savedX = 0
+    private var markersHidden = false
 
     private val markers = mutableListOf<MarkerRef>()
-    private var markersMulti: Boolean? = null
+    private var markersSig: String? = null
     private var recordView: View? = null
     private var lastW = 0
     private var lastH = 0
@@ -66,6 +86,7 @@ class ClickerService : AccessibilityService() {
     private var running = false
     private var steps: List<ClickAction> = emptyList()
     private var idx = 0
+    private var repIdx = 0
     private var loopCount = 0
 
     // ---------- lifecycle ----------
@@ -121,9 +142,9 @@ class ClickerService : AccessibilityService() {
         val v = TextView(this)
         v.text = t
         v.setTextColor(Color.WHITE)
-        v.textSize = 18f
+        v.textSize = 17f
         v.gravity = Gravity.CENTER
-        v.minWidth = dp(40)
+        v.minWidth = dp(36)
         v.minHeight = dp(40)
         v.setOnClickListener { onClick() }
         return v
@@ -168,7 +189,7 @@ class ClickerService : AccessibilityService() {
                     }
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!moved && collapsed) toggleCollapse()
+                    if (!moved) toggleCollapse()
                 }
             }
             true
@@ -180,18 +201,22 @@ class ClickerService : AccessibilityService() {
             intArrayOf(0xFFFF7A00.toInt(), 0xFFFF4D1A.toInt())
         ).apply { shape = GradientDrawable.OVAL }
         startBtn = sb
-        addBtn = btn("+") { addTarget() }
+        addTapBtn = btn("+") { addAction(ActionType.TAP) }
+        addSlideBtn = btn("⇄") { addAction(ActionType.SWIPE) }
+        addScrollBtn = btn("⇅") { addAction(ActionType.SCROLL) }
         recBtn = btn("●") { if (recordView != null) stopRecord() else startRecord() }
         centerBtn = btn("⌖") { recenter() }
-        hideBtn = btn("◀") { toggleCollapse() }
+        eyeBtn = btn("👁") { toggleMarkersHidden() }
         closeBtn = btn("✕") { hidePanel() }
 
         p.addView(handle)
         p.addView(sb, LinearLayout.LayoutParams(dp(40), dp(40)).apply { setMargins(dp(4), 0, dp(4), 0) })
-        p.addView(addBtn)
+        p.addView(addTapBtn)
+        p.addView(addSlideBtn)
+        p.addView(addScrollBtn)
         p.addView(recBtn)
         p.addView(centerBtn)
-        p.addView(hideBtn)
+        p.addView(eyeBtn)
         p.addView(closeBtn)
 
         panel = p
@@ -227,16 +252,28 @@ class ClickerService : AccessibilityService() {
 
     private fun updatePanelButtons() {
         val multi = Prefs.multi
-        addBtn?.visibility = if (!collapsed && multi) View.VISIBLE else View.GONE
-        recBtn?.visibility = if (!collapsed && multi) View.VISIBLE else View.GONE
-        centerBtn?.visibility = if (!collapsed && !multi) View.VISIBLE else View.GONE
-        hideBtn?.visibility = if (collapsed) View.GONE else View.VISIBLE
-        closeBtn?.visibility = if (collapsed) View.GONE else View.VISIBLE
+        val full = !collapsed
+        val vis = { b: Boolean -> if (b) View.VISIBLE else View.GONE }
+        addTapBtn?.visibility = vis(full && multi)
+        addSlideBtn?.visibility = vis(full && multi)
+        addScrollBtn?.visibility = vis(full && multi)
+        recBtn?.visibility = vis(full && multi)
+        centerBtn?.visibility = vis(full && !multi)
+        eyeBtn?.visibility = vis(full)
+        closeBtn?.visibility = vis(full)
     }
 
     private fun toggleCollapse() {
         collapsed = !collapsed
-        if (collapsed) panelLp?.x = 0
+        val l0 = panelLp
+        if (l0 != null) {
+            if (collapsed) {
+                savedX = l0.x
+                l0.x = 0
+            } else if (l0.x == 0) {
+                l0.x = savedX
+            }
+        }
         updatePanelButtons()
         val p = panel
         val l = panelLp
@@ -304,22 +341,75 @@ class ClickerService : AccessibilityService() {
     private fun clearMarkers() {
         markers.forEach { runCatching { wm.removeView(it.view) } }
         markers.clear()
-        markersMulti = null
+        markersSig = null
     }
 
     private fun sanitizeSingle() {
         val (w, h) = screenSize()
         if (Prefs.singleX <= 0f || Prefs.singleX > w || Prefs.singleY <= 0f || Prefs.singleY > h) {
             Prefs.singleX = w / 2f
-            Prefs.singleY = h / 2f
+            Prefs.singleY = h * 0.6f
+        }
+        if (Prefs.singleX2 <= 0f || Prefs.singleX2 > w || Prefs.singleY2 <= 0f || Prefs.singleY2 > h) {
+            Prefs.singleX2 = Prefs.singleX
+            Prefs.singleY2 = (Prefs.singleY - h * 0.3f).coerceAtLeast(dp(40).toFloat())
         }
     }
 
     private fun recenter() {
         val (w, h) = screenSize()
         Prefs.singleX = w / 2f
-        Prefs.singleY = h / 2f
+        Prefs.singleY = h * 0.6f
+        Prefs.singleX2 = w / 2f
+        Prefs.singleY2 = h * 0.3f
         refreshMarkers()
+    }
+
+    private fun buildSpecs(): List<Spec> {
+        val out = mutableListOf<Spec>()
+        if (Prefs.multi) {
+            Session.script.actions.forEachIndexed { i, a ->
+                val n = i + 1
+                when (a.type) {
+                    ActionType.TAP -> out.add(Spec("$n", BLUE, false, a.x, a.y) { nx, ny ->
+                        Session.script.actions.getOrNull(i)?.let { it.x = nx; it.y = ny }
+                    })
+                    ActionType.SWIPE -> {
+                        out.add(Spec("S$n", AMBER, false, a.x, a.y) { nx, ny ->
+                            Session.script.actions.getOrNull(i)?.let { it.x = nx; it.y = ny }
+                        })
+                        out.add(Spec("E$n", PURPLE, false, a.x2, a.y2) { nx, ny ->
+                            Session.script.actions.getOrNull(i)?.let { it.x2 = nx; it.y2 = ny }
+                        })
+                    }
+                    ActionType.SCROLL -> out.add(Spec("$n${ScrollDir.arrow(a.dir)}", GREEN, false, a.x, a.y) { nx, ny ->
+                        Session.script.actions.getOrNull(i)?.let { it.x = nx; it.y = ny }
+                    })
+                }
+            }
+        } else {
+            when (Prefs.singleType) {
+                0 -> out.add(Spec("", ORANGE, true, Prefs.singleX, Prefs.singleY) { nx, ny ->
+                    Prefs.singleX = nx
+                    Prefs.singleY = ny
+                })
+                1 -> {
+                    out.add(Spec("S", AMBER, false, Prefs.singleX, Prefs.singleY) { nx, ny ->
+                        Prefs.singleX = nx
+                        Prefs.singleY = ny
+                    })
+                    out.add(Spec("E", PURPLE, false, Prefs.singleX2, Prefs.singleY2) { nx, ny ->
+                        Prefs.singleX2 = nx
+                        Prefs.singleY2 = ny
+                    })
+                }
+                else -> out.add(Spec(ScrollDir.arrow(Prefs.scrollDir), GREEN, false, Prefs.singleX, Prefs.singleY) { nx, ny ->
+                    Prefs.singleX = nx
+                    Prefs.singleY = ny
+                })
+            }
+        }
+        return out
     }
 
     fun refreshMarkers() {
@@ -328,55 +418,30 @@ class ClickerService : AccessibilityService() {
             clearMarkers()
             return
         }
-        val multi = Prefs.multi
-        if (!multi) sanitizeSingle()
-        val want = if (multi) Session.script.actions.size else 1
-        if (markersMulti != multi || markers.size != want) {
+        if (!Prefs.multi) sanitizeSingle()
+        val specs = buildSpecs()
+        val sig = specs.joinToString(";") { "${it.label}|${it.tint}|${it.crosshair}" }
+        if (sig != markersSig || markers.size != specs.size) {
             clearMarkers()
-            markersMulti = multi
-            if (multi) {
-                Session.script.actions.forEachIndexed { i, a ->
-                    val tint = if (a.type == ActionType.TAP) 0xFF1E88E5.toInt() else 0xFFFB8C00.toInt()
-                    addMarker("${i + 1}", a.x, a.y, tint, false) { nx, ny ->
-                        Session.script.actions.getOrNull(i)?.let { it.x = nx; it.y = ny }
-                    }
-                }
-            } else {
-                addMarker("", Prefs.singleX, Prefs.singleY, 0xFFFF5A1F.toInt(), true) { nx, ny ->
-                    Prefs.singleX = nx
-                    Prefs.singleY = ny
-                }
-            }
+            markersSig = sig
+            specs.forEach { addMarker(it) }
             bringPanelToFront()
         } else {
             markers.forEachIndexed { i, m ->
-                val x: Float
-                val y: Float
-                if (multi) {
-                    val a = Session.script.actions[i]
-                    x = a.x
-                    y = a.y
-                } else {
-                    x = Prefs.singleX
-                    y = Prefs.singleY
-                }
-                m.params.x = (x - m.size / 2f).toInt()
-                m.params.y = (y - m.size / 2f).toInt()
+                m.params.x = (specs[i].x - m.size / 2f).toInt()
+                m.params.y = (specs[i].y - m.size / 2f).toInt()
                 runCatching { wm.updateViewLayout(m.view, m.params) }
             }
         }
-        setMarkersTouchable(!running)
+        applyMarkerState()
     }
 
-    private fun addMarker(
-        label: String, x: Float, y: Float, tint: Int, crosshair: Boolean,
-        onMoved: (Float, Float) -> Unit
-    ) {
+    private fun addMarker(spec: Spec) {
         val size = dp(52)
-        val v = TargetView(this, label, tint, crosshair)
+        val v = TargetView(this, spec.label, spec.tint, spec.crosshair)
         val params = lp(size, size)
-        params.x = (x - size / 2f).toInt()
-        params.y = (y - size / 2f).toInt()
+        params.x = (spec.x - size / 2f).toInt()
+        params.y = (spec.y - size / 2f).toInt()
         var sx = 0f
         var sy = 0f
         var px = 0
@@ -391,18 +456,27 @@ class ClickerService : AccessibilityService() {
                     params.x = (px + (e.rawX - sx).toInt()).coerceIn(-size / 2, w - size / 2)
                     params.y = (py + (e.rawY - sy).toInt()).coerceIn(-size / 2, h - size / 2)
                     runCatching { wm.updateViewLayout(v, params) }
-                    onMoved(params.x + size / 2f, params.y + size / 2f)
+                    spec.onMoved(params.x + size / 2f, params.y + size / 2f)
                 }
                 MotionEvent.ACTION_UP -> Session.persist()
             }
             true
         }
-        markers.add(MarkerRef(v, params, size, onMoved))
+        markers.add(MarkerRef(v, params, size, spec.onMoved))
         runCatching { wm.addView(v, params) }
     }
 
-    private fun setMarkersTouchable(touchable: Boolean) {
+    private fun toggleMarkersHidden() {
+        markersHidden = !markersHidden
+        applyMarkerState()
+    }
+
+    /** Markers are invisible + non-touchable while hidden; non-touchable while running. */
+    private fun applyMarkerState() {
+        val touchable = !running && !markersHidden
+        eyeBtn?.alpha = if (markersHidden) 0.4f else 1f
         for (m in markers) {
+            m.view.alpha = if (markersHidden) 0f else 1f
             m.params.flags = if (touchable) {
                 m.params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
             } else {
@@ -412,18 +486,28 @@ class ClickerService : AccessibilityService() {
         }
     }
 
-    private fun addTarget() {
+    private fun addAction(type: ActionType) {
         val (w, h) = screenSize()
         val n = Session.script.actions.size
-        Session.script.actions.add(
-            ClickAction(
-                ActionType.TAP,
-                (w / 2f + n * dp(12)).coerceAtMost(w - dp(30).toFloat()),
-                (h / 2f + n * dp(12)).coerceAtMost(h - dp(30).toFloat()),
-                durationMs = Prefs.tapDurationMs,
-                delayMs = Prefs.delayMs
+        val off = n * dp(12)
+        val cx = (w / 2f + off).coerceAtMost(w - dp(30).toFloat())
+        val a = when (type) {
+            ActionType.TAP -> ClickAction(
+                ActionType.TAP, cx, (h / 2f + off).coerceAtMost(h - dp(30).toFloat()),
+                durationMs = Prefs.tapDurationMs, delayMs = Prefs.delayMs
             )
-        )
+            ActionType.SWIPE -> ClickAction(
+                ActionType.SWIPE, cx, (h * 0.65f + off).coerceAtMost(h - dp(30).toFloat()),
+                cx, (h * 0.35f + off).coerceAtMost(h - dp(30).toFloat()),
+                durationMs = Prefs.swipeDurationMs, delayMs = Prefs.delayMs
+            )
+            ActionType.SCROLL -> ClickAction(
+                ActionType.SCROLL, cx, (h * 0.6f + off).coerceAtMost(h - dp(30).toFloat()),
+                durationMs = Prefs.swipeDurationMs, delayMs = Prefs.delayMs,
+                dir = Prefs.scrollDir, distPct = Prefs.scrollDistPct
+            )
+        }
+        Session.script.actions.add(a)
         Session.persist()
         refreshMarkers()
     }
@@ -490,27 +574,35 @@ class ClickerService : AccessibilityService() {
 
     // ---------- run loop ----------
 
+    private fun singleAction(): ClickAction = when (Prefs.singleType) {
+        0 -> ClickAction(
+            ActionType.TAP, Prefs.singleX, Prefs.singleY,
+            durationMs = Prefs.tapDurationMs, delayMs = Prefs.delayMs
+        )
+        1 -> ClickAction(
+            ActionType.SWIPE, Prefs.singleX, Prefs.singleY, Prefs.singleX2, Prefs.singleY2,
+            durationMs = Prefs.swipeDurationMs, delayMs = Prefs.delayMs
+        )
+        else -> ClickAction(
+            ActionType.SCROLL, Prefs.singleX, Prefs.singleY,
+            durationMs = Prefs.swipeDurationMs, delayMs = Prefs.delayMs,
+            dir = Prefs.scrollDir, distPct = Prefs.scrollDistPct
+        )
+    }
+
     private fun startRun() {
         if (recordView != null) stopRecord()
-        steps = if (Prefs.multi) {
-            Session.script.actions.map { it.copy() }
-        } else {
-            listOf(
-                ClickAction(
-                    ActionType.TAP, Prefs.singleX, Prefs.singleY,
-                    durationMs = Prefs.tapDurationMs, delayMs = Prefs.delayMs
-                )
-            )
-        }
+        steps = if (Prefs.multi) Session.script.actions.map { it.copy() } else listOf(singleAction())
         if (steps.isEmpty()) {
-            toast("No actions. Use + or ● first.")
+            toast("No actions. Use + ⇄ ⇅ or ● first.")
             return
         }
         running = true
         idx = 0
+        repIdx = 0
         loopCount = 0
         startBtn?.text = "■"
-        setMarkersTouchable(false)
+        applyMarkerState()
         runHandler.postDelayed({ runStep() }, 300)
     }
 
@@ -519,7 +611,7 @@ class ClickerService : AccessibilityService() {
         running = false
         runHandler.removeCallbacksAndMessages(null)
         startBtn?.text = "▶"
-        setMarkersTouchable(true)
+        applyMarkerState()
     }
 
     private fun jit(v: Float): Float {
@@ -532,7 +624,25 @@ class ClickerService : AccessibilityService() {
         val a = steps[idx]
         val path = Path()
         path.moveTo(jit(a.x), jit(a.y))
-        if (a.type == ActionType.SWIPE) path.lineTo(jit(a.x2), jit(a.y2))
+        when (a.type) {
+            ActionType.TAP -> {}
+            ActionType.SWIPE -> path.lineTo(jit(a.x2), jit(a.y2))
+            ActionType.SCROLL -> {
+                val (w, h) = screenSize()
+                val vertical = a.dir == ScrollDir.UP || a.dir == ScrollDir.DOWN
+                val dist = a.distPct.coerceIn(1, 100) / 100f * (if (vertical) h else w)
+                // finger moves opposite to the direction the content scrolls to
+                var ex = a.x
+                var ey = a.y
+                when (a.dir) {
+                    ScrollDir.DOWN -> ey = a.y - dist
+                    ScrollDir.UP -> ey = a.y + dist
+                    ScrollDir.RIGHT -> ex = a.x - dist
+                    else -> ex = a.x + dist
+                }
+                path.lineTo(jit(ex.coerceIn(0f, w.toFloat())), jit(ey.coerceIn(0f, h.toFloat())))
+            }
+        }
         val stroke = GestureDescription.StrokeDescription(path, 0L, a.durationMs.coerceAtLeast(1L))
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
         val cb = object : AccessibilityService.GestureResultCallback() {
@@ -545,13 +655,17 @@ class ClickerService : AccessibilityService() {
 
     private fun advance(a: ClickAction) {
         if (!running) return
-        idx++
-        if (idx >= steps.size) {
-            idx = 0
-            loopCount++
-            if (Prefs.loops > 0 && loopCount >= Prefs.loops) {
-                stopRun()
-                return
+        repIdx++
+        if (repIdx >= a.repeat.coerceAtLeast(1)) {
+            repIdx = 0
+            idx++
+            if (idx >= steps.size) {
+                idx = 0
+                loopCount++
+                if (Prefs.loops > 0 && loopCount >= Prefs.loops) {
+                    stopRun()
+                    return
+                }
             }
         }
         val ri = Prefs.randomIntervalMs

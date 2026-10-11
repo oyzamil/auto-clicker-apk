@@ -2,7 +2,10 @@
 
 Original Android auto-clicker (Kotlin, no external deps beyond core-ktx).
 
-- Single-target: one draggable crosshair, **custom delay in ms**
+- Actions: **click, slide, scroll** (scroll = direction + distance %)
+- Delay input with **ms / sec / min** selector (auto-converted to ms), presets up to 5 min
+- Repeat count (0 = infinite) + per-action repeat in multi mode
+- Single-target: one draggable marker (S/E for slide)
 - Multi-target: numbered draggable targets, record taps/swipes, per-action delay (ms), edit/delete
 - Random position (± px) + random interval (± ms)
 - Save / load / export / import scripts (JSON)
