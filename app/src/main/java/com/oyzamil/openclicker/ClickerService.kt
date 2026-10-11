@@ -1,4 +1,4 @@
-package com.example.openclicker
+package com.oyzamil.openclicker
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription

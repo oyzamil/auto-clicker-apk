@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.openclicker"
+    namespace = "com.oyzamil.openclicker"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.openclicker"
+        applicationId = "com.oyzamil.openclicker"
         minSdk = 26
         targetSdk = 34
         versionCode = 2
