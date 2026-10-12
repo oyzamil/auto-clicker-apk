@@ -44,6 +44,7 @@ class TargetView(
         val cx = width / 2f
         val cy = height / 2f
         val r = min(cx, cy) - ring.strokeWidth
+        txt.textSize = min(width, height) * 0.32f
         canvas.drawCircle(cx, cy, r, fill)
         canvas.drawCircle(cx, cy, r, ring)
         if (crosshair) {

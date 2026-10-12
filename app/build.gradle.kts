@@ -11,8 +11,18 @@ android {
         applicationId = "com.oyzamil.openclicker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 4
+        versionName = "1.3"
+    }
+    signingConfigs {
+        getByName("debug") {
+            // Fixed key committed to the repo so every CI build has the SAME signature.
+            // Updates then install over the old build and keep the accessibility permission.
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
     buildTypes {
         release { isMinifyEnabled = false }

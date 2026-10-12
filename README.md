@@ -1,20 +1,28 @@
 # Open Clicker
 
-Original Android auto-clicker (Kotlin, no external deps beyond core-ktx).
+Android auto-clicker (Kotlin, no third-party dependencies). Package: `com.oyzamil.openclicker`.
 
-- Actions: **click, slide, scroll** (scroll = direction + distance %)
-- Delay input with **ms / sec / min** selector (auto-converted to ms), presets up to 5 min
-- Repeat count (0 = infinite) + per-action repeat in multi mode
-- Single-target: one draggable marker (S/E for slide)
-- Multi-target: numbered draggable targets, record taps/swipes, per-action delay (ms), edit/delete
-- Random position (± px) + random interval (± ms)
-- Save / load / export / import scripts (JSON)
-- Floating panel, collapses to handle + start/stop
+## Actions
+Click, Hold (long press), Slide, Scroll (direction + distance), Pinch / zoom (2 fingers),
+Wait, and system buttons (Back, Home, Recents, Notifications, Quick settings).
+
+## Features
+- Delay input with ms / sec / min segmented selector (auto-converted to ms), presets up to 5 min
+- Start countdown (3-2-1) and auto-stop timer
+- Repeat count + per-action repeat, live run counter and elapsed time on the panel
+- Multi mode: record, add via the + menu, edit, reorder, duplicate, undo, save / load / export / import / share / paste
+- Human-like slide and scroll (curved path, random speed), random position / interval
+- Indicator size slider, lock indicators, hide indicators, panel opacity + size
+- Volume Up + Down together = start / stop
+- Quick Settings tile and a Stop notification
+- Auto-show the floating panel (and load a script) when chosen apps open
+- Kill switch: auto-stop when the screen turns off (default ON)
+- English / Urdu, dark / light / system theme
 
 ## Build
-1. Open folder in Android Studio (Koala+), let Gradle sync.
-2. Run on device (min Android 8.0 / API 26).
-3. Enable *Open Clicker* in Settings > Accessibility. On Android 13+ sideloaded apps: App info > ⋮ > "Allow restricted settings" first.
-4. Open app > Show floating panel.
+1. Push to GitHub. `.github/workflows/build.yml` builds the debug APK and publishes a Release.
+2. Or open in Android Studio and run.
+3. Enable *Open Clicker* in Settings > Accessibility (Android 13+ sideload: App info > ⋮ > Allow restricted settings first).
 
-Release APK: Build > Generate Signed Bundle / APK.
+`app/debug.keystore` is a fixed debug key so every CI build has the same signature
+(updates install over the old build and the accessibility permission survives).
