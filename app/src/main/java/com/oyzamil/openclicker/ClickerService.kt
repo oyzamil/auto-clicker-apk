@@ -97,6 +97,7 @@ class ClickerService : AccessibilityService() {
     private var eyeBtn: TextView? = null
     private var lockBtn: TextView? = null
     private var closeBtn: TextView? = null
+    private var settingsBtn: TextView? = null
     private var collapsed = false
     private var savedX = 0
     private var builtScale = 100
@@ -133,13 +134,24 @@ class ClickerService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        Prefs.init(this)
-        Session.init(this)
+        runCatching { Prefs.init(this) }
+        runCatching { Session.init(this) }
+        runCatching { CrashGuard.installLogger(this) }
+        runCatching { if (Prefs.crashGuard) CrashGuard.installLoopGuard() }
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         instance = this
         registerScreenReceiver()
         updateKeyFilter()
         refreshTile()
+    }
+
+    /** Never let an exception escape a callback: a dead process = "Not working" accessibility service. */
+    private inline fun safe(where: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Exception) {
+            CrashGuard.log(where, e)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -203,12 +215,14 @@ class ClickerService : AccessibilityService() {
         if (screenReceiver != null) return
         val r = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == Intent.ACTION_SCREEN_OFF) {
-                    downKeys.clear()
-                    comboFired = false
-                    if (Prefs.stopOnScreenOff) {
-                        stopRun()
-                        stopRecord()
+                safe("screen off") {
+                    if (intent?.action == Intent.ACTION_SCREEN_OFF) {
+                        downKeys.clear()
+                        comboFired = false
+                        if (Prefs.stopOnScreenOff) {
+                            stopRun()
+                            stopRecord()
+                        }
                     }
                 }
             }
@@ -312,7 +326,7 @@ class ClickerService : AccessibilityService() {
         v.minWidth = pdp(36)
         v.minHeight = pdp(40)
         v.setOnClickListener {
-            runCatching { onClick() }
+            safe("panel button") { onClick() }
         }
         return v
     }
@@ -372,11 +386,8 @@ class ClickerService : AccessibilityService() {
         }
 
         val sb = btn("▶") { toggleRun() }
-        sb.background = GradientDrawable(
-            GradientDrawable.Orientation.TL_BR,
-            intArrayOf(0xFFFF7A00.toInt(), 0xFFFF4D1A.toInt())
-        ).apply { shape = GradientDrawable.OVAL }
         startBtn = sb
+        styleStartBtn()
 
         val st = TextView(this)
         st.setTextColor(Color.WHITE)
@@ -391,6 +402,7 @@ class ClickerService : AccessibilityService() {
         centerBtn = btn("⌖") { recenter() }
         eyeBtn = btn("👁") { toggleMarkersHidden() }
         lockBtn = btn(if (Prefs.markersLocked) "🔒" else "🔓") { toggleLock() }
+        settingsBtn = btn("⚙") { openApp() }
         closeBtn = btn("✕") { hidePanel() }
 
         p.addView(handle)
@@ -401,6 +413,7 @@ class ClickerService : AccessibilityService() {
         p.addView(centerBtn)
         p.addView(eyeBtn)
         p.addView(lockBtn)
+        p.addView(settingsBtn)
         p.addView(closeBtn)
 
         panel = p
@@ -480,7 +493,34 @@ class ClickerService : AccessibilityService() {
         eyeBtn?.visibility = vis(full)
         lockBtn?.visibility = vis(full)
         lockBtn?.text = if (Prefs.markersLocked) "🔒" else "🔓"
+        settingsBtn?.visibility = vis(full && !busy)
         closeBtn?.visibility = vis(full && !busy)
+    }
+
+    /** Red while started (tap = stop), normal orange while stopped. */
+    private fun styleStartBtn() {
+        val b = startBtn ?: return
+        val colors = if (isBusy()) {
+            intArrayOf(0xFFE53935.toInt(), 0xFFB71C1C.toInt())
+        } else {
+            intArrayOf(0xFFFF7A00.toInt(), 0xFFFF4D1A.toInt())
+        }
+        b.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, colors)
+            .apply { shape = GradientDrawable.OVAL }
+    }
+
+    /** Opens the app so the user can change settings; the floating panel stays on screen. */
+    private fun openApp() {
+        dismissMenu()
+        val i = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        if (runCatching { startActivity(i) }.isFailure) {
+            runCatching {
+                PendingIntent.getActivity(
+                    this, 2, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                ).send()
+            }
+        }
     }
 
     private fun toggleCollapse() {
@@ -513,7 +553,7 @@ class ClickerService : AccessibilityService() {
 
     // ---------- add-action menu ----------
 
-    private val menuTimeout = Runnable { dismissMenu() }
+    private val menuTimeout = Runnable { safe("menu timeout") { dismissMenu() } }
 
     private fun toggleMenu() {
         if (menuView != null) dismissMenu() else showMenu()
@@ -1012,6 +1052,10 @@ class ClickerService : AccessibilityService() {
 
     private fun tickCountdown() {
         if (!counting) return
+        safe("countdown") { tickCountdownInner() }
+    }
+
+    private fun tickCountdownInner() {
         if (countRemaining <= 0) {
             counting = false
             beginRun()
@@ -1057,6 +1101,7 @@ class ClickerService : AccessibilityService() {
     }
 
     private fun onBusyChanged() {
+        styleStartBtn()
         updatePanelButtons()
         applyMarkerState()
         updateStats()
@@ -1069,7 +1114,7 @@ class ClickerService : AccessibilityService() {
     private val statsTick = object : Runnable {
         override fun run() {
             if (!running) return
-            updateStats()
+            safe("stats") { updateStats() }
             ui.postDelayed(this, 500)
         }
     }
@@ -1239,6 +1284,7 @@ class ClickerService : AccessibilityService() {
         try {
             doStep()
         } catch (e: Exception) {
+            CrashGuard.log("runStep", e)
             toast("${tr("Stopped")}: ${e.message}")
             stopRun()
         }
@@ -1269,15 +1315,18 @@ class ClickerService : AccessibilityService() {
             return
         }
         val cb = object : AccessibilityService.GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) = advanceIf(token, a, true)
-            override fun onCancelled(gestureDescription: GestureDescription?) = advanceIf(token, a, false)
+            override fun onCompleted(gestureDescription: GestureDescription?) =
+                safe("gesture done") { advanceIf(token, a, true) }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) =
+                safe("gesture cancelled") { advanceIf(token, a, false) }
         }
         val ok = runCatching { dispatchGesture(built.gesture, cb, null) }.getOrDefault(false)
         if (!ok) {
             advanceIf(token, a, false)
         } else {
             // safety net: if the system never calls back, do not hang forever
-            runHandler.postDelayed({ advanceIf(token, a, false) }, built.durMs + 2000L)
+            runHandler.postDelayed({ safe("gesture watchdog") { advanceIf(token, a, false) } }, built.durMs + 2000L)
         }
     }
 

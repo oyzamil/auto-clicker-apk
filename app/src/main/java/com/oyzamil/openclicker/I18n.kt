@@ -155,6 +155,22 @@ object I18n {
         "Tap Stop to end" to "روکنے کے لیے اسٹاپ دبائیں",
         "Stopped" to "رک گیا",
         "Stopped: gestures keep failing" to "رک گیا: جیسچرز بار بار ناکام ہو رہے ہیں",
+        "Stay enabled" to "فعال رکھیں",
+        "Android can turn the accessibility service off by itself (force-stop, battery cleaner, update). Grant one permission once over ADB and the app switches it back on automatically, so you never visit Accessibility settings again." to "اینڈرائیڈ کبھی کبھی ایکسیسبیلٹی سروس خود بند کر دیتا ہے (فورس اسٹاپ، بیٹری کلینر، اپڈیٹ)۔ ADB کے ذریعے ایک بار اجازت دے دیں تو ایپ اسے خود دوبارہ آن کر دیتی ہے، پھر ایکسیسبیلٹی سیٹنگز میں جانا نہیں پڑتا۔",
+        "Auto-enable is active ✓" to "آٹو اینیبل فعال ہے ✓",
+        "Auto-enable is not set up" to "آٹو اینیبل سیٹ نہیں ہے",
+        "Copy ADB command" to "ADB کمانڈ کاپی کریں",
+        "Copied" to "کاپی ہو گیا",
+        "Enable service now" to "سروس ابھی آن کریں",
+        "Enabling…" to "آن ہو رہی ہے…",
+        "Needs the one-time ADB permission first" to "پہلے ایک بار ADB اجازت دینا ضروری ہے",
+        "Re-enable automatically" to "خودکار طور پر دوبارہ آن کریں",
+        "Turns the service back on after a force-stop, update or reboot. Untick it if you want to switch the service off yourself." to "فورس اسٹاپ، اپڈیٹ یا ریبوٹ کے بعد سروس دوبارہ آن کر دیتا ہے۔ اگر خود بند رکھنی ہو تو یہ ہٹا دیں۔",
+        "Crash guard" to "کریش گارڈ",
+        "Keeps the service alive after an unexpected error, so Android does not mark it 'Not working'. Takes effect after the service restarts." to "کسی غیر متوقع خرابی کے بعد سروس کو زندہ رکھتا ہے تاکہ اینڈرائیڈ اسے 'Not working' نہ کرے۔ سروس ری اسٹارٹ ہونے پر لاگو ہوگا۔",
+        "Share error log" to "ایرر لاگ شیئر کریں",
+        "No errors logged" to "کوئی ایرر لاگ نہیں",
+        "No app found to handle this" to "اسے کھولنے کے لیے کوئی ایپ نہیں ملی",
         "Auto-stopped (timer)" to "خودکار بند (ٹائمر)"
     )
 

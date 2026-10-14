@@ -19,6 +19,14 @@ Wait, and system buttons (Back, Home, Recents, Notifications, Quick settings).
 - Kill switch: auto-stop when the screen turns off (default ON)
 - English / Urdu, dark / light / system theme
 
+## Keeping the accessibility service enabled
+Android turns an accessibility service off after a force-stop ("Clear all", battery cleaners), some updates,
+and marks it "Not working" if the app process crashes. The app protects against both:
+- Crash guard + error log (Safety card > Share error log).
+- One-time ADB permission so the app can switch its own service back on (also after reboot / update):
+  `adb shell pm grant com.oyzamil.openclicker android.permission.WRITE_SECURE_SETTINGS`
+  (the app shows this command in the "Stay enabled" card; the grant survives updates, not uninstall).
+
 ## Build
 1. Push to GitHub. `.github/workflows/build.yml` builds the debug APK and publishes a Release.
 2. Or open in Android Studio and run.

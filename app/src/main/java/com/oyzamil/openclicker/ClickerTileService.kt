@@ -16,9 +16,17 @@ class ClickerTileService : TileService() {
 
     override fun onClick() {
         super.onClick()
+        runCatching { Prefs.init(this) }
         val s = ClickerService.instance
         if (s == null) {
-            openApp()
+            // service is off: try to switch it back on by itself (needs the one-time ADB permission)
+            if (AccessibilityEnabler.ensureEnabled(this, repair = true)) {
+                runCatching {
+                    android.widget.Toast.makeText(this, "Service enabling… tap the tile again", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                openApp()
+            }
             return
         }
         // dismissShade = true so the notification shade closes and the target app is visible

@@ -245,6 +245,16 @@ object Prefs {
         get() = bool("notifStop", true)
         set(v) = putBool("notifStop", v)
 
+    /** Switch the accessibility service back on by itself (needs the one-time ADB permission). */
+    var autoEnable: Boolean
+        get() = bool("autoEnable", true)
+        set(v) = putBool("autoEnable", v)
+
+    /** Keep the main thread alive after unexpected exceptions so the service is not marked "Not working". */
+    var crashGuard: Boolean
+        get() = bool("crashGuard", true)
+        set(v) = putBool("crashGuard", v)
+
     /** Notification permission was already requested once (do not nag). */
     var notifAsked: Boolean
         get() = bool("notifAsked", false)

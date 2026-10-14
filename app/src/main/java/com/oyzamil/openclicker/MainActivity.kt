@@ -3,6 +3,7 @@ package com.oyzamil.openclicker
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -84,6 +85,10 @@ class MainActivity : Activity() {
     private lateinit var pinchSeg: Seg
     private lateinit var delayInput: TimeInput
     private lateinit var batteryBtn: TextView
+    private lateinit var stayStatus: TextView
+    private lateinit var stayCmd: TextView
+    private lateinit var stayCopyBtn: TextView
+    private lateinit var stayNowBtn: TextView
     private val reqExport = 1
     private val reqImport = 2
     private val reqNotif = 7
@@ -95,6 +100,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         Prefs.init(this)
         Session.init(this)
+        CrashGuard.installLogger(this)
         val dark = when (Prefs.theme) {
             0 -> true
             1 -> false
@@ -126,8 +132,10 @@ class MainActivity : Activity() {
         super.onResume()
         updateStatus()
         updateBattery()
+        updateStay()
         refreshList()
         refreshAutoApps()
+        tryAutoEnable()
         // the service may have changed mode / script (auto-show profile, undo, ...)
         if (::modeSeg.isInitialized && ::singleHint.isInitialized) {
             modeSeg.refresh()
@@ -139,6 +147,34 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         ClickerService.instance?.onSettingsChanged()
+    }
+
+    /** startActivity that can never crash the process (a dead process = "Not working" service). */
+    private fun safeStart(i: Intent) {
+        runCatching { startActivity(i) }.onFailure { CrashGuard.log("startActivity", it) }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun safeStartForResult(i: Intent, code: Int) {
+        runCatching { startActivityForResult(i, code) }.onFailure {
+            CrashGuard.log("startActivityForResult", it)
+            toast("No app found to handle this")
+        }
+    }
+
+    /** If Android switched the service off and the ADB permission was granted, switch it back on. */
+    private fun tryAutoEnable() {
+        if (ClickerService.instance != null) return
+        if (!Prefs.autoEnable || !AccessibilityEnabler.canWrite(this)) return
+        AccessibilityEnabler.ensureEnabled(this, repair = false)
+        val deco = window.decorView
+        deco.postDelayed({
+            if (!isFinishing && ClickerService.instance == null) {
+                AccessibilityEnabler.ensureEnabled(this, repair = true)
+            }
+        }, 2500)
+        deco.postDelayed({ if (!isFinishing) updateStatus() }, 1500)
+        deco.postDelayed({ if (!isFinishing) updateStatus() }, 4000)
     }
 
     private fun notifGranted(): Boolean =
@@ -429,6 +465,7 @@ class MainActivity : Activity() {
         root.addView(statusCard(), lpm())
         setupCard = setupCard()
         root.addView(setupCard, lpm())
+        root.addView(stayCard(), lpm())
         root.addView(modeCard(), lpm())
         singleCard = singleCard()
         root.addView(singleCard, lpm())
@@ -518,12 +555,7 @@ class MainActivity : Activity() {
         setupCard.visibility = if (on) View.GONE else View.VISIBLE
     }
 
-    private fun enabledInSettings(): Boolean {
-        val s = android.provider.Settings.Secure.getString(
-            contentResolver, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-        return s.contains("$packageName/")
-    }
+    private fun enabledInSettings(): Boolean = AccessibilityEnabler.isEnabledInSettings(this)
 
     private fun setupCard(): LinearLayout {
         val c = card()
@@ -535,7 +567,7 @@ class MainActivity : Activity() {
                 "App info → ⋮ (top right) → Allow restricted settings. Needed once if the app was installed from an APK file.",
                 "Open App info"
             ) {
-                startActivity(
+                safeStart(
                     Intent(
                         android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                         Uri.parse("package:$packageName")
@@ -548,7 +580,7 @@ class MainActivity : Activity() {
             "Installed apps → Open Clicker → turn ON. Used only to perform taps, slides and scrolls.",
             "Open Accessibility"
         ) {
-            startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            safeStart(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
         return c
     }
@@ -569,6 +601,61 @@ class MainActivity : Activity() {
         col.addView(button(label, false, action))
         row.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         parent.addView(row, lpm(12))
+    }
+
+    // ---------- stay enabled (self re-enable via WRITE_SECURE_SETTINGS) ----------
+
+    private fun stayCard(): View {
+        val c = card()
+        c.addView(text("Stay enabled", 16f, P.text, true))
+        val hint = text(
+            "Android can turn the accessibility service off by itself (force-stop, battery cleaner, update). Grant one permission once over ADB and the app switches it back on automatically, so you never visit Accessibility settings again.",
+            12f, P.sub
+        )
+        hint.setPadding(0, dp(2), 0, dp(10))
+        c.addView(hint)
+
+        stayStatus = text("", 14f, P.text, true)
+        c.addView(stayStatus, lpm(8))
+
+        stayCmd = text(AccessibilityEnabler.adbCommand(this), 12f, P.accent, true)
+        stayCmd.typeface = Typeface.MONOSPACE
+        stayCmd.setTextIsSelectable(true)
+        stayCmd.background = rr(P.field, 10)
+        stayCmd.setPadding(dp(10), dp(10), dp(10), dp(10))
+        c.addView(stayCmd, lpm(8))
+
+        stayCopyBtn = button("Copy ADB command", false) {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("adb", AccessibilityEnabler.adbCommand(this)))
+            toast("Copied")
+        }
+        c.addView(stayCopyBtn, lpm(8))
+
+        stayNowBtn = button("Enable service now", true) {
+            val ok = AccessibilityEnabler.ensureEnabled(this, repair = true, force = true)
+            toast(if (ok) "Enabling…" else "Needs the one-time ADB permission first")
+            window.decorView.postDelayed({ if (!isFinishing) updateStatus() }, 1500)
+        }
+        c.addView(stayNowBtn, lpm(8))
+
+        checkRow(
+            c, "Re-enable automatically",
+            "Turns the service back on after a force-stop, update or reboot. Untick it if you want to switch the service off yourself.",
+            { Prefs.autoEnable }, { Prefs.autoEnable = it }
+        )
+        updateStay()
+        return c
+    }
+
+    private fun updateStay() {
+        if (!::stayStatus.isInitialized) return
+        val granted = AccessibilityEnabler.canWrite(this)
+        stayStatus.text = tr(if (granted) "Auto-enable is active ✓" else "Auto-enable is not set up")
+        stayStatus.setTextColor(if (granted) P.ok else P.sub)
+        stayCmd.visibility = if (granted) View.GONE else View.VISIBLE
+        stayCopyBtn.visibility = if (granted) View.GONE else View.VISIBLE
+        stayNowBtn.visibility = if (granted) View.VISIBLE else View.GONE
     }
 
     // ---------- mode + single action ----------
@@ -850,6 +937,11 @@ class MainActivity : Activity() {
             "Kill switch. If an infinite loop hangs the phone, locking the screen stops the clicker. Turn OFF to keep clicking with the screen off.",
             { Prefs.stopOnScreenOff }, { Prefs.stopOnScreenOff = it }
         )
+        checkRow(
+            c, "Crash guard",
+            "Keeps the service alive after an unexpected error, so Android does not mark it 'Not working'. Takes effect after the service restarts.",
+            { Prefs.crashGuard }, { Prefs.crashGuard = it }
+        )
         c.addView(text("Keep service alive", 14f, P.text, true))
         val hint2 = text(
             "If Android keeps turning the accessibility service off, remove battery limits. On Xiaomi / Oppo / Vivo / Samsung also enable Autostart and lock the app in Recents.",
@@ -858,9 +950,23 @@ class MainActivity : Activity() {
         hint2.setPadding(0, dp(2), 0, dp(8))
         c.addView(hint2)
         batteryBtn = button("", false) { requestBatteryExemption() }
-        c.addView(batteryBtn)
+        c.addView(batteryBtn, lpm(8))
+        c.addView(button("Share error log", false) { shareErrorLog() })
         updateBattery()
         return c
+    }
+
+    private fun shareErrorLog() {
+        val log = CrashGuard.readLog()
+        if (log.isBlank()) {
+            toast("No errors logged")
+            return
+        }
+        val send = Intent(Intent.ACTION_SEND)
+        send.type = "text/plain"
+        send.putExtra(Intent.EXTRA_SUBJECT, "Open Clicker error log")
+        send.putExtra(Intent.EXTRA_TEXT, log.takeLast(30_000))
+        safeStart(Intent.createChooser(send, tr("Share error log")))
     }
 
     private fun updateBattery() {
@@ -879,7 +985,7 @@ class MainActivity : Activity() {
                     Uri.parse("package:$packageName")
                 )
             )
-        }
+        }.onFailure { CrashGuard.log("battery intent", it) }
         if (first.isFailure) {
             runCatching {
                 startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
@@ -1070,13 +1176,13 @@ class MainActivity : Activity() {
             i.addCategory(Intent.CATEGORY_OPENABLE)
             i.type = "application/json"
             i.putExtra(Intent.EXTRA_TITLE, "clicker-script.json")
-            startActivityForResult(i, reqExport)
+            safeStartForResult(i, reqExport)
         }, weight(0, 4))
         r2.addView(button("Import", false) {
             val i = Intent(Intent.ACTION_OPEN_DOCUMENT)
             i.addCategory(Intent.CATEGORY_OPENABLE)
             i.type = "*/*"
-            startActivityForResult(i, reqImport)
+            safeStartForResult(i, reqImport)
         }, weight(4, 0))
         c.addView(r2, lpm(8))
 
@@ -1342,7 +1448,7 @@ class MainActivity : Activity() {
         send.type = "text/plain"
         send.putExtra(Intent.EXTRA_SUBJECT, "Open Clicker script")
         send.putExtra(Intent.EXTRA_TEXT, json)
-        startActivity(Intent.createChooser(send, tr("Share script")))
+        safeStart(Intent.createChooser(send, tr("Share script")))
     }
 
     private fun pasteScript() {
